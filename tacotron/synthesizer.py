@@ -1,4 +1,5 @@
 import os
+import platform
 import wave
 from datetime import datetime
 
@@ -71,7 +72,7 @@ class Synthesizer:
 		saver.restore(self.session, checkpoint_path)
 
 
-	def synthesize(self, texts, basenames, out_dir, log_dir, mel_filenames):
+	def synthesize(self, texts, basenames, out_dir, log_dir, mel_filenames, linear_live=True, play=False):
 		hparams = self._hparams
 		cleaner_names = [x.strip() for x in hparams.cleaners.split(',')]
 		#[-max, max] or [0,max]
@@ -160,13 +161,26 @@ class Synthesizer:
 		mels = np.clip(mels, T2_output_range[0], T2_output_range[1])
 
 		if basenames is None:
-			#Generate wav and read it
-			if hparams.GL_on_GPU:
-				wav = self.session.run(self.GLGPU_mel_outputs, feed_dict={self.GLGPU_mel_inputs: mels[0]})
-				wav = audio.inv_preemphasis(wav, hparams.preemphasis, hparams.preemphasize)
+			if linear_live:
+				if hparams.GL_on_GPU:
+					wav = self.session.run(self.GLGPU_lin_outputs, feed_dict={self.GLGPU_lin_inputs: linears[0]})
+					wav = audio.inv_preemphasis(wav, hparams.preemphasis, hparams.preemphasize)
+				else:
+					wav = audio.inv_linear_spectrogram(linears[0].T, hparams)
+				audio.save_wav(wav, 'temp.wav', sr=hparams.sample_rate)
+
 			else:
-				wav = audio.inv_mel_spectrogram(mels[0].T, hparams)
-			audio.save_wav(wav, 'temp.wav', sr=hparams.sample_rate) #Find a better way
+				#Generate wav and read it
+				if hparams.GL_on_GPU:
+					wav = self.session.run(self.GLGPU_mel_outputs, feed_dict={self.GLGPU_mel_inputs: mels[0]})
+					wav = audio.inv_preemphasis(wav, hparams.preemphasis, hparams.preemphasize)
+				else:
+					wav = audio.inv_mel_spectrogram(mels[0].T, hparams)
+				audio.save_wav(wav, 'temp.wav', sr=hparams.sample_rate) #Find a better way
+			log('Sythesis finish')
+
+			if not play:
+				return
 
 			if platform.system() == 'Linux':
 				#Linux wav reader
